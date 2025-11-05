@@ -1,0 +1,28 @@
+{
+    "configurations": [
+        {
+            "name": "baseline_k5-50",
+            "epochs": 50,
+            "learning_rate": 0.001,
+            "conv_layers": [[32, 5], [64, 5], [128, 5]],
+            "dense_units": [128],
+            "dropout_rate": 0.5
+        },
+        {
+            "name": "baseline-50",
+            "epochs": 50,
+            "learning_rate": 0.001,
+            "conv_layers": [[32, 3], [64, 3], [128, 3]],
+            "dense_units": [128],
+            "dropout_rate": 0.5
+        },
+        {
+            "name": "less_conv_16_32_64-50",
+            "epochs": 50,
+            "learning_rate": 0.001,
+            "conv_layers": [[16, 3], [32, 3], [64, 3]],
+            "dense_units": [128],
+            "dropout_rate": 0.5
+        }
+    ]
+  }
