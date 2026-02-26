@@ -124,13 +124,13 @@ class BulletHoleProcessor:
         w = np.min([width, w_0])
         h = np.min([height, h_0])
         if w > h:
-            diff_dist = (w - h) / 2
+            diff_dist = int(np.floor((w - h) / 2))
             y = np.max([y - diff_dist, 0])
-            h = w
+            h = np.min([w, height])
         if h > w:
-            diff_dist = (h - w) / 2
+            diff_dist = int(np.floor((h - w) / 2))
             x = np.max([x - diff_dist, 0])
-            w = h
+            w = np.min([h, width])
         else:
             w = w_0
             h = h_0
