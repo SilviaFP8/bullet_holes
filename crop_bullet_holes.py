@@ -116,8 +116,24 @@ class BulletHoleProcessor:
             return None
         
         # Get bounding rectangle
-        x, y, w, h = cv2.boundingRect(largest_contour)
-        
+        x, y, w_0, h_0 = cv2.boundingRect(largest_contour)
+
+        # Get image dimensions
+        height, width = image.shape[:2]
+        # Make bounding square
+        w = np.min([width, w_0])
+        h = np.min([height, h_0])
+        if w > h:
+            diff_dist = (w - h) / 2
+            y = np.max([y - diff_dist, 0])
+            h = w
+        if h > w:
+            diff_dist = (h - w) / 2
+            x = np.max([x - diff_dist, 0])
+            w = h
+        else:
+            w = w_0
+            h = h_0
         return image, (x, y, w, h)
     
     def crop_and_square_hole(self, image_path: str, output_path: str = None, 
