@@ -29,9 +29,9 @@ class BulletHoleProcessor:
                     adaptive_block: int = 11,
                     adaptive_C: int = 2,
                     # Threshold for Sobel/Laplacian (if None, use Otsu)
-                    binary_thresh: Optional[int] = 25,
+                    binary_thresh: Optional[int] = None,
                     # Median filter parameter
-                    median_kernel_size: int = 0   # (0 = no median filter)
+                    median_kernel_size: int = 3   # (0 = no median filter, 3 = default median filter)
                    ) -> Optional[Tuple[np.ndarray, Tuple[int, int, int, int]]]:
         """
         Detect bullet hole in an image.
@@ -127,7 +127,7 @@ class BulletHoleProcessor:
             diff_dist = int(np.floor((w - h) / 2))
             y = np.max([y - diff_dist, 0])
             h = np.min([w, height])
-        if h > w:
+        elif h > w:
             diff_dist = int(np.floor((h - w) / 2))
             x = np.max([x - diff_dist, 0])
             w = np.min([h, width])
