@@ -2,8 +2,10 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Callable
 import os
+import json
+import re
 
 class BulletHoleProcessor:
     def __init__(self, min_hole_size: int = 2000, max_hole_size: int = 1500000):
@@ -18,27 +20,33 @@ class BulletHoleProcessor:
         self.max_hole_size = max_hole_size
         
     def detect_hole(self, image_path: str, 
-                    edge_method: str = 'sobel', 
-                    # Sobel/Laplacian parameters
-                    sobel_ksize: int = 3,
-                    laplacian_ksize: int = 3,
-                    # Canny parameters
-                    canny_thresh1: int = 30,
-                    canny_thresh2: int = 90,
-                    # Adaptive threshold parameters
-                    adaptive_block: int = 11,
-                    adaptive_C: int = 2,
-                    # Threshold for Sobel/Laplacian (if None, use Otsu)
-                    binary_thresh: Optional[int] = None,
-                    # Median filter parameter
-                    median_kernel_size: int = 3   # (0 = no median filter, 3 = default median filter)
-                   ) -> Optional[Tuple[np.ndarray, Tuple[int, int, int, int]]]:
+                edge_method: str = 'sobel', 
+                # Sobel/Laplacian parameters
+                sobel_ksize: int = 3,
+                laplacian_ksize: int = 3,
+                # Canny parameters
+                canny_thresh1: int = 30,
+                canny_thresh2: int = 90,
+                # Adaptive threshold parameters
+                adaptive_block: int = 11,
+                adaptive_C: int = 2,
+                # Threshold for Sobel/Laplacian (if None, use Otsu)
+                binary_thresh: Optional[int] = None,
+                # Median filter parameter
+                median_kernel_size: int = 0,   # (0 = no median filter, 3 = default median filter)
+                # Allow per‑call override of hole size limits
+                min_hole_size: Optional[int] = None,
+                max_hole_size: Optional[int] = None
+               ) -> Optional[Tuple[np.ndarray, Tuple[int, int, int, int]]]:
         """
         Detect bullet hole in an image.
         
         Returns:
             Tuple of (image, bounding_rect) or None if no hole found
         """
+        # Use provided limits or fall back to instance defaults
+        min_sz = min_hole_size if min_hole_size is not None else self.min_hole_size
+        max_sz = max_hole_size if max_hole_size is not None else self.max_hole_size
         # Read image
         image = cv2.imread(image_path)
         if image is None:
@@ -106,7 +114,7 @@ class BulletHoleProcessor:
         
         for contour in contours:
             area = cv2.contourArea(contour)
-            if self.min_hole_size < area < self.max_hole_size:
+            if min_sz < area < max_sz:
                 if area > max_area:
                     max_area = area
                     largest_contour = contour
@@ -117,9 +125,12 @@ class BulletHoleProcessor:
         
         # Get bounding rectangle
         x, y, w_0, h_0 = cv2.boundingRect(largest_contour)
+        # x, y, w, h = cv2.boundingRect(largest_contour)
+        # print(f"1: Detected hole at (x={x}, y={y}, w={w_0}, h={h_0}), area={max_area}")
 
         # Get image dimensions
         height, width = image.shape[:2]
+        # print(f"Image dimensions: width={width}, height={height}")
         # Make bounding square
         w = np.min([width, w_0])
         h = np.min([height, h_0])
@@ -134,10 +145,12 @@ class BulletHoleProcessor:
         else:
             w = w_0
             h = h_0
+        # print(f"2: Detected hole at (x={x}, y={y}, w={w}, h={h}), area={max_area}")
         return image, (x, y, w, h)
     
     def crop_and_square_hole(self, image_path: str, output_path: str = None, 
-                           padding: int = 10, visualize: bool = False) -> Optional[np.ndarray]:
+                         padding: int = 10, visualize: bool = False,
+                         **kwargs) -> Optional[np.ndarray]:
         """
         Detect, crop, and square the bullet hole.
         
@@ -151,7 +164,7 @@ class BulletHoleProcessor:
             Squared hole image or None if processing failed
         """
         # Detect hole
-        result = self.detect_hole(image_path)
+        result = self.detect_hole(image_path, **kwargs)
         if result is None:
             return None
             
@@ -202,7 +215,9 @@ class BulletHoleProcessor:
         return square_hole
     
     def process_multiple_images(self, input_dir: str, output_dir: str, 
-                               padding: int = 10) -> None:
+                           padding: int = 10, 
+                           file_filter: Optional[Callable[[str], bool]] = None,
+                           **kwargs) -> None:
         """
         Process all images in a directory.
         
@@ -218,23 +233,28 @@ class BulletHoleProcessor:
         supported_formats = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff')
         
         for img_file in input_path.iterdir():
-            if img_file.suffix.lower() in supported_formats:
-                print(f"Processing: {img_file.name}")
+            if not img_file.is_file():
+                continue
+            if img_file.suffix.lower() not in supported_formats:
+                continue
+            if file_filter is not None and not file_filter(img_file.name):
+                continue
                 
-                output_file = output_path / f"squared_{img_file.name}"
-                
-                result = self.crop_and_square_hole(
-                    str(img_file), 
-                    str(output_file),
-                    padding=padding,
-                    visualize=False
-                )
-                
-                if result is not None:
-                    print(f"  ✓ Success: {img_file.name}")
-                else:
-                    print(f"  ✗ Failed: {img_file.name}")
-
+            print(f"Processing: {img_file.name}")
+            output_file = output_path / f"squared_{img_file.name}"
+            
+            # Pass kwargs to crop_and_square_hole
+            result = self.crop_and_square_hole(
+                str(img_file), 
+                str(output_file),
+                padding=padding,
+                visualize=False,
+                **kwargs
+            )
+            if result is not None:
+                print(f"  ✓ Success: {img_file.name}")
+            else:
+                print(f"  ✗ Failed: {img_file.name}")
 
 def visualize_process(image_path: str):
     """
@@ -390,52 +410,124 @@ def compare_median_filter(image_path: str, kernel_size: int = 3, sobel_ksize: in
     plt.show()
 
 
+def run_batch_processing():
+    base_input = os.path.expanduser("~/Documentos/Silvia_FP/original_1800_fotos/")
+    base_output = os.path.expanduser("~/Documentos/Silvia_FP/crop_dataset/")
+    
+    dataset_path = os.path.join(base_input, 'dataset')
+    dataset3_path = os.path.join(base_input, 'dataset3')
+    
+    # Ranges for drywall/particleboard (remain in code)
+    drywall_ranges = {
+        'class_1': (9777, 9955), 'class_2': (9422, 9589), 'class_3': (9087, 9250),
+        'class_4': (8722, 8887), 'class_5': (8397, 8561), 'class_6': (8004, 8173),
+    }
+    particleboard_ranges = {
+        'class_1': (9605, 9775), 'class_2': (9252, 9420), 'class_3': (8920, 9085),
+        'class_4': (8554, 8720), 'class_5': (8222, 8395), 'class_6': (7825, 7989),
+    }
+    
+    def make_range_filter(low, high):
+        pattern = re.compile(r'IMG_(\d+)')
+        def filt(filename):
+            match = pattern.search(filename)
+            if not match:
+                return False
+            num = int(match.group(1))
+            return low <= num <= high
+        return filt
+    
+    # Load configurations from JSON
+    with open('./configurations/crop_configs.json', 'r') as f:
+        config_data = json.load(f)
+    configs = config_data['configs']
+    # Convert string keys back to tuples
+    configs = {eval(key): value for key, value in configs.items()}
+    
+    processor = BulletHoleProcessor()
+    
+    for (material, class_name), kwargs in configs.items():
+        # Determine input directory
+        if material == 'plate':
+            input_dir = os.path.join(dataset3_path, class_name)
+        else:  # drywall or particleboard
+            input_dir = os.path.join(dataset_path, class_name)
+        
+        if not os.path.isdir(input_dir):
+            print(f"Warning: {input_dir} missing. Skipping.")
+            continue
+        
+        # Output subfolder: crop_dataset/material/class_name
+        output_dir = os.path.join(base_output, material, class_name)
+        os.makedirs(output_dir, exist_ok=True)   # creates subfolders automatically
+        
+        # Select filter
+        if material == 'drywall':
+            low, high = drywall_ranges[class_name]
+            file_filter = make_range_filter(low, high)
+        elif material == 'particleboard':
+            low, high = particleboard_ranges[class_name]
+            file_filter = make_range_filter(low, high)
+        else:
+            file_filter = None  # plate: no filter
+        
+        print(f"\n=== Processing {material} - {class_name} with {kwargs} ===")
+        processor.process_multiple_images(
+            input_dir=input_dir,
+            output_dir=output_dir,
+            padding=10,
+            file_filter=file_filter,
+            **kwargs
+        )
+        print(f"=== Finished ===\n")
+
+
 # Example usage
 if __name__ == "__main__":
     # Initialize processor
     processor = BulletHoleProcessor()
     
     # Process a single image    
-    class1_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_1/15gr_1.jpg"
-    class1_plate = os.path.expanduser(class1_plate)
-    #class2_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_2/30gr_6.jpg"
-    class2_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_2/30gr_9.jpg"
-    #class2_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_2/30gr_10_.jpg"
-    class2_plate = os.path.expanduser(class2_plate)
-    class3_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_3/45gr_9_.jpg"
-    class3_plate = os.path.expanduser(class3_plate)
-    class4_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_4/60gr_1.jpg"
-    class4_plate = os.path.expanduser(class4_plate)
-    class5_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_5/75gr_25_.jpg"
-    class5_plate = os.path.expanduser(class5_plate)
-    class6_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_6/90gr_1.jpg"
-    class6_plate = os.path.expanduser(class6_plate)
+    # class1_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_1/15gr_1.jpg"
+    # class1_plate = os.path.expanduser(class1_plate)
+    # #class2_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_2/30gr_6.jpg"
+    # class2_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_2/30gr_9.jpg"
+    # #class2_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_2/30gr_10_.jpg"
+    # class2_plate = os.path.expanduser(class2_plate)
+    # class3_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_3/45gr_9_.jpg"
+    # class3_plate = os.path.expanduser(class3_plate)
+    # class4_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_4/60gr_1.jpg"
+    # class4_plate = os.path.expanduser(class4_plate)
+    # class5_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_5/75gr_25_.jpg"
+    # class5_plate = os.path.expanduser(class5_plate)
+    # class6_plate = "~/Documentos/Silvia_FP/original_1800_fotos/dataset3/class_6/90gr_1.jpg"
+    # class6_plate = os.path.expanduser(class6_plate)
     
-    class1_drywall = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_1/IMG_9840.png"
-    class1_drywall = os.path.expanduser(class1_drywall)
-    class2_drywall = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_2/IMG_9424.png"
-    class2_drywall = os.path.expanduser(class2_drywall)
-    class3_drywall = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_3/IMG_9090.png"
-    class3_drywall = os.path.expanduser(class3_drywall)
-    class4_drywall = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_4/IMG_8723.png"
-    class4_drywall = os.path.expanduser(class4_drywall)
-    class5_drywall = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_5/IMG_8407.png"
-    class5_drywall = os.path.expanduser(class5_drywall)
-    class6_drywall = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_6/IMG_7993.png"
-    class6_drywall = os.path.expanduser(class6_drywall)
+    # class1_drywall = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_1/IMG_9840.png"
+    # class1_drywall = os.path.expanduser(class1_drywall)
+    # class2_drywall = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_2/IMG_9424.png"
+    # class2_drywall = os.path.expanduser(class2_drywall)
+    # class3_drywall = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_3/IMG_9090.png"
+    # class3_drywall = os.path.expanduser(class3_drywall)
+    # class4_drywall = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_4/IMG_8723.png"
+    # class4_drywall = os.path.expanduser(class4_drywall)
+    # class5_drywall = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_5/IMG_8407.png"
+    # class5_drywall = os.path.expanduser(class5_drywall)
+    # class6_drywall = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_6/IMG_7993.png"
+    # class6_drywall = os.path.expanduser(class6_drywall)
     
-    class1_particleboard = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_1/IMG_9605.png"
-    class1_particleboard = os.path.expanduser(class1_particleboard)
-    class2_particleboard = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_2/IMG_9256.png"
-    class2_particleboard = os.path.expanduser(class2_particleboard)
-    class3_particleboard = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_3/IMG_8928.png"
-    class3_particleboard = os.path.expanduser(class3_particleboard)
-    class4_particleboard = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_4/IMG_8557.png"
-    class4_particleboard = os.path.expanduser(class4_particleboard)
-    class5_particleboard = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_5/IMG_8228.png"
-    class5_particleboard = os.path.expanduser(class5_particleboard)
-    class6_particleboard = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_6/IMG_7827.png"
-    class6_particleboard = os.path.expanduser(class6_particleboard)
+    # class1_particleboard = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_1/IMG_9605.png"
+    # class1_particleboard = os.path.expanduser(class1_particleboard)
+    # class2_particleboard = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_2/IMG_9256.png"
+    # class2_particleboard = os.path.expanduser(class2_particleboard)
+    # class3_particleboard = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_3/IMG_8928.png"
+    # class3_particleboard = os.path.expanduser(class3_particleboard)
+    # class4_particleboard = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_4/IMG_8557.png"
+    # class4_particleboard = os.path.expanduser(class4_particleboard)
+    # class5_particleboard = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_5/IMG_8228.png"
+    # class5_particleboard = os.path.expanduser(class5_particleboard)
+    # class6_particleboard = "~/Documentos/Silvia_FP/original_1800_fotos/dataset/class_6/IMG_7827.png"
+    # class6_particleboard = os.path.expanduser(class6_particleboard)
     
     # Method 1: Basic processing
     # result = processor.crop_and_square_hole(
@@ -456,5 +548,8 @@ if __name__ == "__main__":
     # )
     
     # Method 3: Visualize the process
-    visualize_process(class2_plate)
+    #visualize_process(class2_plate)
     #compare_median_filter(class5_drywall)
+    
+    # Method 4. Run the full batch processing with the six configurations
+    run_batch_processing()
